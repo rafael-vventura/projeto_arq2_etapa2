@@ -6,7 +6,7 @@ class SimuladorTarefa2:
         self.ciclo = 1
         self.circuito_ula = ULA()
 
-        # Banco dos 10 registadores da Mic-1
+        # Banco dos 10 registadores da arquitetura Mic-1
         self.banco_regs = {
             "mar": 0, "mdr": 0, "pc": 0, "mbr": 0,
             "sp": 0, "lv": 0, "cpp": 0, "tos": 0,
@@ -21,7 +21,7 @@ class SimuladorTarefa2:
         self.caminho_log.parent.mkdir(parents=True, exist_ok=True)
 
     def carregar_estado_inicial(self):
-        # Carrega os valores iniciais dos registadores a partir do ficheiro
+        # Carrega o ficheiro de configuracao inicial dos registadores
         with open(self.caminho_regs, 'r') as arq:
             for linha in arq:
                 if "=" in linha:
@@ -29,14 +29,14 @@ class SimuladorTarefa2:
                     self.banco_regs[nome.strip().lower()] = int(valor.strip(), 2)
 
     def decodificar_microinstrucao(self, palavra):
-        # Separa a microinstrucao de 21 bits em controlo da ULA, Barramento C e Barramento B
+        # Fatia a microinstrucao de 21 bits nos 3 campos de controlo
         ctrl_ula = int(palavra[0:8], 2)
         ctrl_bus_c = int(palavra[8:17], 2)
         ctrl_bus_b = int(palavra[17:21], 2)
         return ctrl_ula, ctrl_bus_c, ctrl_bus_b
 
     def obter_barramento_b(self, codigo_b):
-        # Mapeamento dos 4 bits de selecao da fonte para o Barramento B
+        # Decodificador de 4 bits para selecao do registador fonte no Barramento B
         mapa_fontes = {
             0: "mdr", 1: "pc", 2: "mbr", 3: "mbru",
             4: "sp", 5: "lv", 6: "cpp", 7: "opc", 8: "tos"
@@ -45,16 +45,19 @@ class SimuladorTarefa2:
         if nome_reg == "none":
             return 0, nome_reg
 
-        # Leitura inicial simples (o refinamento de extensao de sinal fica para o commit 6)
-        if nome_reg in ["mbr", "mbru"]:
-            dado_b = self.banco_regs["mbr"] & 0xFF
+        # Bugfix: extensao de sinal preservando complemento para dois em mbr e zeros em mbru
+        if nome_reg == "mbru":
+            return self.banco_regs["mbr"] & 0x000000FF, nome_reg
+        elif nome_reg == "mbr":
+            val = self.banco_regs["mbr"]
+            if (val & 0b10000000) != 0:
+                return val | 0xFFFFFF00, nome_reg
+            return val & 0x000000FF, nome_reg
         else:
-            dado_b = self.banco_regs[nome_reg]
-
-        return dado_b, nome_reg
+            return self.banco_regs[nome_reg], nome_reg
 
     def obter_nomes_barramento_c(self, ctrl_bus_c):
-        # Mapeamento dos nomes dos registadores com escrita ativada no Barramento C
+        # Mapeamento estrito dos bits 8 a 0 para os registadores do Barramento C
         lista_c = ["mar", "mdr", "pc", "sp", "lv", "cpp", "tos", "opc", "h"]
         destinos = []
         for i in reversed(range(9)):
@@ -63,14 +66,14 @@ class SimuladorTarefa2:
         return destinos
 
     def aplicar_barramento_c(self, ctrl_bus_c, valor_sd):
-        # Atualiza os registadores habilitados pelo Barramento C com o resultado deslocado
+        # Bugfix: gravacao paralela nos registadores ativados no Barramento C
         lista_c = ["mar", "mdr", "pc", "sp", "lv", "cpp", "tos", "opc", "h"]
         for indice, reg in enumerate(lista_c):
             if (ctrl_bus_c >> indice) & 1:
                 self.banco_regs[reg] = valor_sd & 0xFFFFFFFF
 
     def formatar_registradores(self):
-        # Gera o bloco em texto com os 10 registadores formatados em binario
+        # Formata o estado dos 10 registadores (mbr em 8 bits e restantes em 32 bits)
         linhas = []
         for r in self.ordem_exibicao:
             v = self.banco_regs[r]
@@ -78,7 +81,6 @@ class SimuladorTarefa2:
         return "\n".join(linhas)
 
     def executar(self):
-        # Le todas as instrucoes do programa
         instrucoes = []
         with open(self.caminho_prog, 'r') as arq_in:
             for linha in arq_in:
@@ -87,11 +89,11 @@ class SimuladorTarefa2:
                     instrucoes.append(linha)
 
         with open(self.caminho_log, 'w') as log:
-            # 1. Cabecalho inicial: lista das instrucoes a executar
+            # Cabecalho do log com todas as instrucoes do programa
             log.write("\n".join(instrucoes) + "\n")
             log.write("\n" + "=" * 53 + "\n")
 
-            # 2. Estado inicial dos registadores
+            # Exibicao do estado inicial carregado
             self.carregar_estado_inicial()
             log.write("> Initial register states\n")
             log.write(self.formatar_registradores() + "\n")
@@ -100,7 +102,7 @@ class SimuladorTarefa2:
             log.write("Start of program\n")
             log.write("=" * 53 + "\n")
 
-            # 3. Execucao ciclo a ciclo
+            # Processamento ciclo a ciclo
             for inst in instrucoes:
                 ctrl_ula, ctrl_bus_c, ctrl_bus_b = self.decodificar_microinstrucao(inst)
 
@@ -117,7 +119,7 @@ class SimuladorTarefa2:
                 log.write("> Registers before instruction\n")
                 log.write(self.formatar_registradores() + "\n\n")
 
-                # Decomposicao dos sinais de controlo da ULA
+                # Decomposicao dos 8 bits de controlo da ULA
                 sll8 = (ctrl_ula >> 7) & 1
                 sra1 = (ctrl_ula >> 6) & 1
                 f0   = (ctrl_ula >> 5) & 1
@@ -127,7 +129,7 @@ class SimuladorTarefa2:
                 inva = (ctrl_ula >> 1) & 1
                 inc  = (ctrl_ula >> 0) & 1
 
-                # Entrada A e soldada permanentemente no registador H
+                # Entrada A fixada permanentemente em H
                 dado_a = self.banco_regs["h"] if ena else 0
                 dado_b = valor_b if enb else 0
 
@@ -143,7 +145,7 @@ class SimuladorTarefa2:
 
                 self.ciclo += 1
 
-            # 4. Encerramento com o ciclo final
+            # Finalizacao padrao com o numero do ultimo ciclo valido executado
             log.write(f"Cycle {self.ciclo - 1}\n")
             log.write("No more lines, EOP.\n")
 
