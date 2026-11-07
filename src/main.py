@@ -45,6 +45,15 @@ class SimuladorTarefa1:
 
                     sll8, sra1, f0, f1, ena, enb, inva, inc = self.decodificar_8bits()
 
+                    # Bugfix: verifica se ha combinacao proibida de sinais de deslocamento
+                    if sll8 == 1 and sra1 == 1:
+                        log.write("=" * 60 + "\n")
+                        log.write(f"Cycle {self.pc}\n\n")
+                        log.write(f"PC = {self.pc}\n")
+                        log.write(f"IR = {self.ir:08b}\n")
+                        log.write("> Error, invalid control signals.\n")
+                        break
+
                     # Aplica a portaria ENA/ENB nos operandos de entrada
                     a_efetivo = self.reg_a if ena else 0
                     b_efetivo = self.reg_b if enb else 0
